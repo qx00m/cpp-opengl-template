@@ -21,6 +21,37 @@ T *allocate(size_t n)
 	return static_cast<T*>(sys_allocate(n * sizeof(T), alignof(T)));
 }
 
+////////
+//
+// generic algorithms
+
+template<typename I, typename S>
+I copy_string(I f, I l, S sz)
+{
+	if (f == l)
+		return f;
+
+	while (f + 1 != l && *sz)
+		*f++ = *sz++;
+
+	*f = 0;
+	return f;
+}
+
+////////
+//
+// generic data structures
+
+template<typename N, typename T>
+struct array
+{
+	N limit;
+	N count;
+	T *data;
+};
+
+////////
+
 typedef int16_t i16;
 typedef int32_t i32;
 typedef uint8_t u8;
@@ -55,19 +86,6 @@ typedef float f32;
 #define BUTTON_LEFT	0x01
 #define BUTTON_RIGHT 	0x02
 
-enum { DIR_FOLDER, DIR_FILE };
-
-struct dir
-{
-	u64 flags;
-
-	struct dir *parent;
-	struct dir *next;
-	struct dir *sub;
-
-	wchar_t *name;
-};
-
 struct glyph
 {
 	u32 codepoint;
@@ -96,9 +114,7 @@ struct font
 	i32 height;
 	i32 external_leading;
 
-	i32 glyphs_max;
-	i32 glyphs_used;
-	struct glyph *glyphs;
+	array<i32, glyph> glyphs;
 };
 
 #define SYSTEM_FUNCTIONS	\

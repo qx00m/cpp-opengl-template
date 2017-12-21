@@ -117,9 +117,9 @@ sys_create_font(const wchar_t *name, i32 pixel_height)
 	HBITMAP hbitmap = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, (void**)&result->bits, 0, 0);
 	SelectObject(dc, hbitmap);
 
-	result->glyphs_max = 256;
-	result->glyphs_used = 0;
-	result->glyphs = allocate<glyph>((size_t)result->glyphs_max);
+	result->glyphs.limit = 256;
+	result->glyphs.count = 0;
+	result->glyphs.data = allocate<glyph>((size_t)result->glyphs.limit);
 
 	return result;
 }
@@ -150,35 +150,6 @@ sys_render_glyph(struct font *font, u32 codepoint)
 	GetCharABCWidths((HDC)font->sys, codepoint, codepoint, &abc);
 	i32 result = (i32)(abc.abcA + abc.abcB + abc.abcC);
 	return result;
-}
-
-void
-sys_subdir(struct dir *dir)
-{
-	unused(dir);
-}
-
-struct dir *
-sys_dir(const wchar_t *path)
-{
-	size_t n = 0;
-	while (path[n])
-		++n;
-
-	const wchar_t *search = L"d:\\samples\\*";
-
-	WIN32_FIND_DATA fd;
-	HANDLE hfind = FindFirstFile(search, &fd);
-	if (hfind == INVALID_HANDLE_VALUE)
-		return 0;
-
-	do {
-
-	} while (FindNextFile(hfind, &fd));
-
-	FindClose(hfind);
-
-	return 0;
 }
 
 ////////

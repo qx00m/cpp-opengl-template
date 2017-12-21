@@ -27,17 +27,12 @@ struct rect2d { f32 x0, y0, x1, y1; };
 
 struct vertex
 {
-	struct vec3 position;
-	struct vec2 texcoord;
-	struct vec4 color;
+	vec3 position;
+	vec2 texcoord;
+	vec4 color;
 };
 
-struct vertex_buffer
-{
-	i32 max;
-	i32 used;
-	struct vertex *vertices;
-};
+using vertex_buffer = array<i32, vertex>;
 
 struct app_state
 {
@@ -62,7 +57,7 @@ struct app_state
 
 	u32 *atlas_bits;
 
-	struct vertex_buffer vertex_buffer;
+	vertex_buffer vertices;
 
 	struct font *console_font;
 	struct font *ui_font;
@@ -77,53 +72,70 @@ struct app_state
 ////////
 
 internal char *
-label_i32d(char *dst, const char *s, i32 x)
+fmt_base10(char *f, char *l, u64 num)
 {
-	while (*s)
-		*dst++ = *s++;
-
-	u64 num = 0;
-	if (x < 0) {
-		*dst++ = '-';
-		num = (u64)-x;
-	}
-	else {
-		num = (u64)x;
-	}
+	if (f == l)
+		return f;
 
 	char digits[20];
 	char *p = digits;
+
 	do
 		*p++ = (char)((num % 10) + '0');
 	while (num /= 10);
 
-	while (p != digits)
-		*dst++ = *--p;
+	while (p != digits && f + 1 != l)
+		*f++ = *--p;
 
-	*dst = 0;
-
-	return dst;
+	*f = 0;
+	return f;
 }
 
 internal char *
-label_u32h(char *dst, const char *s, u32 x)
+string_append_char(char *f, char *l, char c)
 {
-	while (*s)
-		*dst++ = *s++;
+	if (f == l)
+		return f;
 
-	*dst++ = '0';
-	*dst++ = 'x';
+	if (f + 1 != l)
+		*f++ = c;
+
+	*f = 0;
+	return f;
+}
+
+internal char *
+label_i32d(char *f, char *l, const char *s, i32 x)
+{
+	f = copy_string(f, l, s);
+
+	if (x < 0) {
+		f = string_append_char(f, l, '-');
+		return fmt_base10(f, l, (u64)-x);
+	}
+	else {
+		return fmt_base10(f, l, (u64)x);
+	}
+}
+
+internal char *
+label_u32h(char *f, char *l, const char *s, u32 x)
+{
+	f = copy_string(f, l, s);
+
+	*f++ = '0';
+	*f++ = 'x';
 
 	u32 shift = 32;
 	while (shift) {
 		shift -= 4;
 		char c = (char)((x >> shift) & 0xF);
 		c = (c > 9) ? c + 'A' - 10 : c + '0';
-		*dst++ = c;
+		*f++ = c;
 	}
 
-	*dst = 0;
-	return dst;
+	*f = 0;
+	return f;
 }
 
 internal inline f32
@@ -177,9 +189,9 @@ opengl_program(const char *vs_src, const char *fs_src)
 internal struct glyph *
 render_glyph(struct app_state *state, struct font *font, u32 codepoint)
 {
-	struct glyph *g = font->glyphs;
+	struct glyph *g = font->glyphs.data;
 	{
-		struct glyph *end = g + font->glyphs_used;
+		struct glyph *end = g + font->glyphs.count;
 		while (g != end) {
 			if (g->codepoint == codepoint)
 				return g;
@@ -187,8 +199,8 @@ render_glyph(struct app_state *state, struct font *font, u32 codepoint)
 		}
 	}
 
-	assert(font->glyphs_used != font->glyphs_max);
-	++font->glyphs_used;
+	assert(font->glyphs.count != font->glyphs.limit);
+	++font->glyphs.count;
 
 	g->codepoint = codepoint;
 	g->xadv = sys_render_glyph(font, codepoint);
@@ -269,17 +281,17 @@ internal inline void
 upload_vertices(struct app_state *state)
 {
 	glBindBuffer(GL_ARRAY_BUFFER, state->vbo);
-	glBufferData(GL_ARRAY_BUFFER, (ptrdiff_t)(sizeof(struct vertex) * state->vertex_buffer.used), state->vertex_buffer.vertices, GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, (ptrdiff_t)(sizeof(struct vertex) * state->vertices.count), state->vertices.data, GL_STREAM_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 internal void
-mesh_rect2d(struct vertex_buffer *buffer, f32 x0, f32 y0, f32 x1, f32 y1, f32 z, f32 u0, f32 v0, f32 u1, f32 v1, struct vec4 color)
+mesh_rect2d(vertex_buffer *vertices, f32 x0, f32 y0, f32 x1, f32 y1, f32 z, f32 u0, f32 v0, f32 u1, f32 v1, struct vec4 color)
 {
-	assert(buffer->used + 6 <= buffer->max);
+	assert(vertices->count + 6 <= vertices->limit);
 
-	struct vertex *v = buffer->vertices + buffer->used;
-	buffer->used += 6;
+	struct vertex *v = vertices->data + vertices->count;
+	vertices->count += 6;
 
 	v[0] = { { x0, y0, z }, { u0, v0 }, color };
 	v[1] = { { x1, y0, z }, { u1, v0 }, color };
@@ -296,7 +308,7 @@ print(struct app_state *state, struct font *font, const char *s, struct vec2 cur
 	f32 w = (f32)state->atlas_width;
 	f32 h = (f32)state->atlas_height;
 
-	state->vertex_buffer.used = 0;
+	state->vertices.count = 0;
 
 	f32 x = round(cursor.x);
 	f32 y = round(cursor.y);
@@ -316,7 +328,7 @@ print(struct app_state *state, struct font *font, const char *s, struct vec2 cur
 			f32 u1 = glyph->x1 / w;
 			f32 v1 = glyph->y1 / h;
 
-			mesh_rect2d(&state->vertex_buffer, x0, y0, x1, y1, z, u0, v0, u1, v1, color);
+			mesh_rect2d(&state->vertices, x0, y0, x1, y1, z, u0, v0, u1, v1, color);
 
 			x += glyph->xadv;
 		}
@@ -324,7 +336,7 @@ print(struct app_state *state, struct font *font, const char *s, struct vec2 cur
 		++s;
 	}
 
-	if (state->vertex_buffer.used == 0)
+	if (state->vertices.count == 0)
 		return cursor;
 
 	if (state->atlas_is_dirty) {
@@ -340,7 +352,7 @@ print(struct app_state *state, struct font *font, const char *s, struct vec2 cur
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 	glBindTexture(GL_TEXTURE_2D, state->atlas);
 	glUseProgram(state->texture_program);
-	glDrawArrays(GL_TRIANGLES, 0, state->vertex_buffer.used);
+	glDrawArrays(GL_TRIANGLES, 0, state->vertices.count);
 	glUseProgram(0);
 	glBindTexture(GL_TEXTURE_2D, 0);
 	glDisable(GL_BLEND);
@@ -349,8 +361,8 @@ print(struct app_state *state, struct font *font, const char *s, struct vec2 cur
 	return cursor;
 }
 
-internal struct vec2
-println(struct app_state *state, struct font *font, const char *s, struct vec2 cursor, f32 z, struct vec4 color)
+internal vec2
+println(app_state *state, struct font *font, const char *s, vec2 cursor, f32 z, vec4 color)
 {
 	print(state, font, s, cursor, z, color);
 	cursor.y -= line_height(font);
@@ -359,15 +371,15 @@ println(struct app_state *state, struct font *font, const char *s, struct vec2 c
 
 
 internal inline void
-draw_rect2d(struct app_state *state, struct rect2d position, f32 z, struct vec4 color)
+draw_rect2d(app_state *state, struct rect2d position, f32 z, vec4 color)
 {
-	state->vertex_buffer.used = 0;
-	mesh_rect2d(&state->vertex_buffer, position.x0, position.y0, position.x1, position.y1, z, 0.f, 0.f, 0.f, 0.f, color);
+	state->vertices.count = 0;
+	mesh_rect2d(&state->vertices, position.x0, position.y0, position.x1, position.y1, z, 0.f, 0.f, 0.f, 0.f, color);
 
 	upload_vertices(state);
 
 	glUseProgram(state->basic_program);
-	glDrawArrays(GL_TRIANGLES, 0, state->vertex_buffer.used);
+	glDrawArrays(GL_TRIANGLES, 0, state->vertices.count);
 	glUseProgram(0);
 }
 
@@ -394,67 +406,71 @@ reload(void *userdata)
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-	const char *basic_vs_src = "#version 330\n"
-		"\n"
-		"layout(location = 0) in vec3 vs_position;\n"
-		"layout(location = 1) in vec2 vs_texcoord;\n"
-		"layout(location = 2) in vec4 vs_color;\n"
-		"\n"
-		"out vec4 fs_color;\n"
-		"\n"
-		"uniform mat4 proj;\n"
-		"\n"
-		"void main(void)\n"
-		"{\n"
-		"	fs_color = vs_color;\n"
-		"	gl_Position = proj * vec4(vs_position, 1);\n"
-		"}\n";
+	const char *basic_vs_src = R"(#version 330
 
-	const char *basic_fs_src = "#version 330\n"
-		"\n"
-		"in vec4 fs_color;\n"
-		"\n"
-		"out vec4 frag_color;\n"
-		"\n"
-		"void main(void)\n"
-		"{\n"
-		"	frag_color = fs_color;\n"
-		"}\n";
+		layout(location = 0) in vec3 vs_position;
+		layout(location = 1) in vec2 vs_texcoord;
+		layout(location = 2) in vec4 vs_color;
+
+		out vec4 fs_color;
+
+		uniform mat4 proj;
+
+		void main(void)
+		{
+			fs_color = vs_color;
+			gl_Position = proj * vec4(vs_position, 1);
+		}
+	)";
+
+	const char *basic_fs_src = R"(#version 330
+
+		in vec4 fs_color;
+
+		out vec4 frag_color;
+
+		void main(void)
+		{
+			frag_color = fs_color;
+		}
+	)";
 	state->basic_program = opengl_program(basic_vs_src, basic_fs_src);
 	state->basic_uproj = glGetUniformLocation(state->basic_program, "proj");
 	assert(state->basic_uproj != -1);
 
-	const char *texture_vs_src = "#version 330\n"
-		"\n"
-		"layout(location = 0) in vec3 vs_position;\n"
-		"layout(location = 1) in vec2 vs_texcoord;\n"
-		"layout(location = 2) in vec4 vs_color;\n"
-		"\n"
-		"out vec2 fs_texcoord;\n"
-		"out vec4 fs_color;\n"
-		"\n"
-		"uniform mat4 proj;\n"
-		"\n"
-		"void main(void)\n"
-		"{\n"
-		"	fs_texcoord = vs_texcoord;\n"
-		"	fs_color = vs_color;\n"
-		"	gl_Position = proj * vec4(vs_position, 1);\n"
-		"}\n";
+	const char *texture_vs_src = R"(#version 330
 
-	const char *texture_fs_src = "#version 330\n"
-		"\n"
-		"in vec2 fs_texcoord;\n"
-		"in vec4 fs_color;\n"
-		"\n"
-		"out vec4 frag_color;\n"
-		"\n"
-		"uniform sampler2D texture_map;\n"
-		"\n"
-		"void main(void)\n"
-		"{\n"
-		"	frag_color = texture(texture_map, fs_texcoord) * fs_color;\n"
-		"}\n";
+		layout(location = 0) in vec3 vs_position;
+		layout(location = 1) in vec2 vs_texcoord;
+		layout(location = 2) in vec4 vs_color;
+
+		out vec2 fs_texcoord;
+		out vec4 fs_color;
+
+		uniform mat4 proj;
+
+		void main(void)
+		{
+			fs_texcoord = vs_texcoord;
+			fs_color = vs_color;
+			gl_Position = proj * vec4(vs_position, 1);
+		}
+	)";
+
+	const char *texture_fs_src = R"(#version 330
+
+		in vec2 fs_texcoord;
+		in vec4 fs_color;
+
+		out vec4 frag_color;
+
+		uniform sampler2D texture_map;
+
+		void main(void)
+		{
+			frag_color = texture(texture_map, fs_texcoord) * fs_color;
+		}
+	)";
 	state->texture_program = opengl_program(texture_vs_src, texture_fs_src);
 	state->texture_uproj = glGetUniformLocation(state->texture_program, "proj");
 	assert(state->texture_uproj != -1);
@@ -480,9 +496,9 @@ reload(void *userdata)
 
 	glEnable(GL_FRAMEBUFFER_SRGB);
 
-	state->vertex_buffer.max = 1024 * 64;
-	state->vertex_buffer.used = 0;
-	state->vertex_buffer.vertices = allocate<vertex>((size_t)(state->vertex_buffer.max));
+	state->vertices.limit = 1024 * 64;
+	state->vertices.count = 0;
+	state->vertices.data = allocate<vertex>((size_t)(state->vertices.limit));
 
 	// load assets
 	state->console_font = sys_create_font(L"Courier New", 10);
@@ -562,14 +578,15 @@ render(void *userdata, i32 window_width, i32 window_height)
 	// display user input state.
 
 	char buf[128];
+	char *end = buf + sizeof(buf);
 	cursor.x = (f32)window_width - 250.f;
 	cursor.y = (f32)window_height - line_height(state->console_font);
 
-	label_i32d(buf, "mouse x: ", state->mouse_x);
+	label_i32d(buf, end, "mouse x: ", state->mouse_x);
 	cursor = println(state, state->console_font, buf, cursor, z, white_color);
-	label_i32d(buf, "mouse y: ", state->mouse_y);
+	label_i32d(buf, end, "mouse y: ", state->mouse_y);
 	cursor = println(state, state->console_font, buf, cursor, z, white_color);
-	label_u32h(buf, "buttons: ", state->mouse_buttons);
+	label_u32h(buf, end, "buttons: ", state->mouse_buttons);
 	cursor = println(state, state->console_font, buf, cursor, z, white_color);
 }
 
