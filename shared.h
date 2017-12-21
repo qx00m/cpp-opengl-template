@@ -25,6 +25,9 @@ T *allocate(size_t n)
 //
 // generic algorithms
 
+template<typename T> inline T min(T a, T b) { return b < a ? b : a; }
+template<typename T> inline T max(T a, T b) { return a > b ? a : b; }
+
 template<typename I, typename S>
 I copy_string(I f, I l, S sz)
 {
@@ -38,6 +41,13 @@ I copy_string(I f, I l, S sz)
 	return f;
 }
 
+template<typename N, typename O, typename I, typename F> inline
+void transform_n(N n, O dst, I src, F f)
+{
+	while (n--)
+		*dst++ = f(*src++);
+}
+
 ////////
 //
 // generic data structures
@@ -48,6 +58,9 @@ struct array
 	N limit;
 	N count;
 	T *data;
+
+	friend T *begin(array a) { return a.data; }
+	friend T *end(array a) { return a.data + a.count; }
 };
 
 ////////

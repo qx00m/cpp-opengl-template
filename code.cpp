@@ -72,7 +72,7 @@ struct app_state
 ////////
 
 internal char *
-fmt_base10(char *f, char *l, u64 num)
+base10_string(char *f, char *l, u64 num)
 {
 	if (f == l)
 		return f;
@@ -91,13 +91,39 @@ fmt_base10(char *f, char *l, u64 num)
 	return f;
 }
 
+// todo: buffer overflow
+internal char *
+base16_string(char *f, char *l, u64 num, size_t minwidth, char fillchar)
+{
+	if (f == l)
+		return f;
+
+	char digits[16];
+	char *p = digits;
+
+	do {
+		char c = (char)(num % 16);
+		c = (c > 9) ? c - 10 + 'A' : c + '0';
+		*p++ = c;
+	} while (num /= 16);
+
+	while (p != digits && f + 1 != l)
+		*f++ = *--p;
+
+	unused(minwidth);
+	unused(fillchar);
+
+	*f = 0;
+	return f;
+}
+
 internal char *
 string_append_char(char *f, char *l, char c)
 {
 	if (f == l)
 		return f;
 
-	if (f + 1 != l)
+	if (f + 2 <= l)
 		*f++ = c;
 
 	*f = 0;
@@ -111,10 +137,10 @@ label_i32d(char *f, char *l, const char *s, i32 x)
 
 	if (x < 0) {
 		f = string_append_char(f, l, '-');
-		return fmt_base10(f, l, (u64)-x);
+		return base10_string(f, l, (u64)-x);
 	}
 	else {
-		return fmt_base10(f, l, (u64)x);
+		return base10_string(f, l, (u64)x);
 	}
 }
 
@@ -122,19 +148,9 @@ internal char *
 label_u32h(char *f, char *l, const char *s, u32 x)
 {
 	f = copy_string(f, l, s);
-
-	*f++ = '0';
-	*f++ = 'x';
-
-	u32 shift = 32;
-	while (shift) {
-		shift -= 4;
-		char c = (char)((x >> shift) & 0xF);
-		c = (c > 9) ? c + 'A' - 10 : c + '0';
-		*f++ = c;
-	}
-
-	*f = 0;
+	f = string_append_char(f, l, '0');
+	f = string_append_char(f, l, 'x');
+	f = base16_string(f, l, x, 8, '0');
 	return f;
 }
 
@@ -189,13 +205,10 @@ opengl_program(const char *vs_src, const char *fs_src)
 internal struct glyph *
 render_glyph(struct app_state *state, struct font *font, u32 codepoint)
 {
-	struct glyph *g = font->glyphs.data;
-	{
-		struct glyph *end = g + font->glyphs.count;
-		while (g != end) {
-			if (g->codepoint == codepoint)
-				return g;
-			++g;
+	glyph *g = font->glyphs.data;
+	for (glyph *e = end(font->glyphs); g != e; ++g) {
+		if (g->codepoint == codepoint) {
+			return g;
 		}
 	}
 
@@ -214,10 +227,10 @@ render_glyph(struct app_state *state, struct font *font, u32 codepoint)
 	for (i32 y = 0; y < font->bitmap_height; ++y) {
 		for (i32 x = 0; x < font->bitmap_width; ++x) {
 			if (*p) {
-				if (x < xmin) xmin = x;
-				if (x > xmax) xmax = x;
-				if (y < ymin) ymin = y;
-				if (y > ymax) ymax = y;
+				xmin = min(xmin, x);
+				xmax = max(x, xmax);
+				ymin = min(ymin, y);
+				ymax = max(y, ymax);
 			}
 			++p;
 		}
@@ -236,25 +249,20 @@ render_glyph(struct app_state *state, struct font *font, u32 codepoint)
 			state->atlas_ymax = 0;
 		}
 
-		if (h > state->atlas_ymax)
-			state->atlas_ymax = h;
+		state->atlas_ymax = max(h, state->atlas_ymax);
 
-		u32 *srcrow = font->bits + ymin * font->bitmap_width + xmin;
-		u32 *dstrow = state->atlas_bits + state->atlas_y * state->atlas_width + state->atlas_x;
+		auto convert_pixel = [](u32 x) {
+			u32 c = x & 0xFF;
+			return (c << 24) | (c << 16) | (c << 8) | c;
+		};
+
+		u32 *src = font->bits + ymin * font->bitmap_width + xmin;
+		u32 *dst = state->atlas_bits + state->atlas_y * state->atlas_width + state->atlas_x;
 
 		for (i32 y = 0; y < h; ++y) {
-			u32 *src = srcrow;
-			u32 *dst = dstrow;
-			for (i32 x = 0; x < w; ++x) {
-				if (*src) {
-					u32 c = *src & 0xFF;
-					*dst = (c << 24) | (c << 16) | (c << 8) | c;
-				}
-				++src;
-				++dst;
-			}
-			srcrow += font->bitmap_width;
-			dstrow += state->atlas_width;
+			transform_n(w, dst, src, convert_pixel);
+			src += font->bitmap_width;
+			dst += state->atlas_width;
 		}
 
 		g->x0 = state->atlas_x;
@@ -278,15 +286,15 @@ render_glyph(struct app_state *state, struct font *font, u32 codepoint)
 }
 
 internal inline void
-upload_vertices(struct app_state *state)
+upload_vertices(app_state *state)
 {
 	glBindBuffer(GL_ARRAY_BUFFER, state->vbo);
-	glBufferData(GL_ARRAY_BUFFER, (ptrdiff_t)(sizeof(struct vertex) * state->vertices.count), state->vertices.data, GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, (ptrdiff_t)(sizeof(vertex) * state->vertices.count), state->vertices.data, GL_STREAM_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 internal void
-mesh_rect2d(vertex_buffer *vertices, f32 x0, f32 y0, f32 x1, f32 y1, f32 z, f32 u0, f32 v0, f32 u1, f32 v1, struct vec4 color)
+mesh_rect2d(vertex_buffer *vertices, f32 x0, f32 y0, f32 x1, f32 y1, f32 z, f32 u0, f32 v0, f32 u1, f32 v1, vec4 color)
 {
 	assert(vertices->count + 6 <= vertices->limit);
 
@@ -302,8 +310,8 @@ mesh_rect2d(vertex_buffer *vertices, f32 x0, f32 y0, f32 x1, f32 y1, f32 z, f32 
 	v[5] = { { x0, y1, z }, { u0, v1 }, color };
 }
 
-internal struct vec2
-print(struct app_state *state, struct font *font, const char *s, struct vec2 cursor, f32 z, struct vec4 color)
+internal vec2
+print(app_state *state, struct font *font, const char *s, vec2 cursor, f32 z, vec4 color)
 {
 	f32 w = (f32)state->atlas_width;
 	f32 h = (f32)state->atlas_height;
@@ -371,7 +379,7 @@ println(app_state *state, struct font *font, const char *s, vec2 cursor, f32 z, 
 
 
 internal inline void
-draw_rect2d(app_state *state, struct rect2d position, f32 z, vec4 color)
+draw_rect2d(app_state *state, rect2d position, f32 z, vec4 color)
 {
 	state->vertices.count = 0;
 	mesh_rect2d(&state->vertices, position.x0, position.y0, position.x1, position.y1, z, 0.f, 0.f, 0.f, 0.f, color);
@@ -400,9 +408,9 @@ reload(void *userdata)
 	glEnableVertexAttribArray(0);
 	glEnableVertexAttribArray(1);
 	glEnableVertexAttribArray(2);
-	glVertexAttribPointer(0, 3, GL_FLOAT, false, sizeof(struct vertex), (void *)offsetof(struct vertex, position));
-	glVertexAttribPointer(1, 2, GL_FLOAT, false, sizeof(struct vertex), (void *)offsetof(struct vertex, texcoord));
-	glVertexAttribPointer(2, 4, GL_FLOAT, false, sizeof(struct vertex), (void *)offsetof(struct vertex, color));
+	glVertexAttribPointer(0, 3, GL_FLOAT, false, sizeof(vertex), (void *)offsetof(vertex, position));
+	glVertexAttribPointer(1, 2, GL_FLOAT, false, sizeof(vertex), (void *)offsetof(vertex, texcoord));
+	glVertexAttribPointer(2, 4, GL_FLOAT, false, sizeof(vertex), (void *)offsetof(vertex, color));
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
