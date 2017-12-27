@@ -48,6 +48,29 @@ void transform_n(N n, O dst, I src, F f)
 		*dst++ = f(*src++);
 }
 
+template<typename T0, typename T1>
+struct pair
+{
+	T0 m0;
+	T1 m1;
+};
+
+template<typename N, typename O, typename I>
+pair<O, I> copy_n(N n, O dst, I src)
+{
+	while (n--)
+		*dst++ = *src++;
+	return { dst, src };
+}
+
+template<typename N, typename I, typename T>
+I fill_n(N n, I it, const T& x)
+{
+	while (n--)
+		*it++ = x;
+	return it;
+}
+
 ////////
 //
 // generic data structures
@@ -59,12 +82,43 @@ struct array
 	N count;
 	T *data;
 
-	friend T *begin(array a) { return a.data; }
-	friend T *end(array a) { return a.data + a.count; }
+	friend T *begin(array& a) { return a.data; }
+	friend T *end(array& a) { return a.data + a.count; }
+
+	friend void reserve(array& a, N limit)
+	{
+		if (limit <= a.limit)
+			return;
+
+		T *data = allocate<T>((size_t)limit);
+		copy_n(a.count, data, a.data);
+		sys_deallocate(a.data, (size_t)a.limit * sizeof(T), alignof(T));
+
+		a.limit = limit;
+		a.data = data;
+	}
+
+	// allocateds n items at the end of the array. if there is not enough
+	// room it reallocates more memory using a growth factor of 2.
+	friend T *allocate_n(array& a, N n)
+	{
+		if (N m = a.count + n; m > a.limit) {
+			reserve(a, max(a.limit * 2, m));
+		}
+
+		T *result = a.data + a.count;
+		a.count += n;
+		return result;
+	}
+
+	friend void clear(array& a) { a.count = 0; }
+
+	friend bool is_empty(const array& a) { return a.count == 0; }
 };
 
 ////////
 
+typedef int8_t i8;
 typedef int16_t i16;
 typedef int32_t i32;
 typedef uint8_t u8;

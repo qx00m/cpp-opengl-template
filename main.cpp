@@ -54,20 +54,20 @@ static void *global_userdata;
 //
 
 internal inline void *
-sys_allocate(size_t n, size_t alignment)
+sys_allocate(size_t size, size_t alignment)
 {
-	if (n == 0)
+	if (size == 0)
 		return 0;
 
-	void *p = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, n);
+	void *p = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
 	assert((uintptr_t)p % alignment == 0);
 	return p;
 }
 
 internal inline void
-sys_deallocate(void *p, size_t n, size_t alignment)
+sys_deallocate(void *p, size_t size, size_t alignment)
 {
-	unused(n);
+	unused(size);
 	unused(alignment);
 
 	if (p == 0)
@@ -116,10 +116,6 @@ sys_create_font(const wchar_t *name, i32 pixel_height)
 	bi.bmiHeader.biCompression = BI_RGB;
 	HBITMAP hbitmap = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, (void**)&result->bits, 0, 0);
 	SelectObject(dc, hbitmap);
-
-	result->glyphs.limit = 256;
-	result->glyphs.count = 0;
-	result->glyphs.data = allocate<glyph>((size_t)result->glyphs.limit);
 
 	return result;
 }
